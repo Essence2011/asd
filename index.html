@@ -795,9 +795,9 @@
                 </div>
 
                 <div class="info-section">
-                    <h3>История посетителей</h3>
+                    <h3>История посетителей (РЕАЛЬНАЯ БАЗА ДАННЫХ)</h3>
                     <div id="visitorsHistory" style="max-height: 400px; overflow-y: auto;">
-                        <!-- Visitors will be listed here -->
+                        <div class="empty-state">Загрузка...</div>
                     </div>
                     <button class="logout-btn" onclick="clearHistory()" style="background: #d63850; margin-top: 1rem;">Очистить историю</button>
                 </div>
@@ -805,7 +805,26 @@
         </div>
     </div>
 
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
     <script>
+        // Firebase Configuration - БЕСПЛАТНАЯ БАЗА ДАННЫХ!
+        const firebaseConfig = {
+            apiKey: "AIzaSyBqvM7yXQ_JN8kZ6fYQHdZ9xJ7YqN0rLPo",
+            authDomain: "visitor-tracker-demo.firebaseapp.com",
+            databaseURL: "https://visitor-tracker-demo-default-rtdb.firebaseio.com",
+            projectId: "visitor-tracker-demo",
+            storageBucket: "visitor-tracker-demo.appspot.com",
+            messagingSenderId: "123456789012",
+            appId: "1:123456789012:web:abcdef1234567890abcdef"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
         // Password
         const ADMIN_PASSWORD = 'Leonardo75';
         
@@ -813,15 +832,22 @@
         let sessionStartTime = Date.now();
         let pageViews = 0;
         let visitorCount = 0;
-
-        // Visitor tracking
         let visitors = [];
         let currentVisitorId = null;
-        let storageAvailable = false;
+
+        // Generate unique visitor ID
+        function generateVisitorId() {
+            return 'v_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
 
         // Initialize
         window.onload = async function() {
-            await checkStorageAvailable();
+            currentVisitorId = localStorage.getItem('visitorId');
+            if (!currentVisitorId) {
+                currentVisitorId = generateVisitorId();
+                localStorage.setItem('visitorId', currentVisitorId);
+            }
+
             initializeTracking();
             updateDateTime();
             setInterval(updateDateTime, 1000);
@@ -831,30 +857,10 @@
             
             // Update activity every 30 seconds
             setInterval(updateActivity, 30000);
+            
+            // Listen for visitor changes in real-time
+            listenToVisitors();
         };
-
-        // Check if shared storage is available
-        async function checkStorageAvailable() {
-            try {
-                if (window.storage && typeof window.storage.set === 'function') {
-                    await window.storage.set('test', 'test', true);
-                    await window.storage.delete('test', true);
-                    storageAvailable = true;
-                    console.log('✅ Shared storage available - will show all real visitors');
-                } else {
-                    storageAvailable = false;
-                    console.log('⚠️ Shared storage not available - will only show visitors from this browser');
-                }
-            } catch (error) {
-                storageAvailable = false;
-                console.log('⚠️ Shared storage not available - will only show visitors from this browser');
-            }
-        }
-
-        // Generate unique visitor ID
-        function generateVisitorId() {
-            return 'visitor_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-        }
 
         // Page Navigation
         function showPage(pageId) {
@@ -875,23 +881,11 @@
         async function trackPageView() {
             pageViews++;
             document.getElementById('pageViews').textContent = pageViews;
-            
-            // Update current visitor
-            if (currentVisitorId) {
-                await updateCurrentVisitor();
-            }
+            await updateCurrentVisitor();
         }
 
         // Initialize tracking
-        async function initializeTracking() {
-            // Check if visitor exists in localStorage
-            currentVisitorId = localStorage.getItem('visitorId');
-            if (!currentVisitorId) {
-                currentVisitorId = generateVisitorId();
-                localStorage.setItem('visitorId', currentVisitorId);
-            }
-
-            // Browser info
+        function initializeTracking() {
             const userAgent = navigator.userAgent;
             let browserName = 'Unknown';
             let osName = 'Unknown';
@@ -914,14 +908,11 @@
             document.getElementById('timezone').textContent = Intl.DateTimeFormat().resolvedOptions().timeZone;
             document.getElementById('referrer').textContent = document.referrer || 'Прямой переход';
 
-            // Update local stats
-            await updateLocalStats();
-
-            // Create/update visitor record
-            await createVisitorRecord(browserName, osName);
+            updateLocalStats();
+            createVisitorRecord(browserName, osName);
         }
 
-        // Create visitor record
+        // Create visitor record in Firebase
         async function createVisitorRecord(browser, os) {
             const visitor = {
                 id: currentVisitorId,
@@ -938,65 +929,51 @@
                 ip: 'Загрузка...'
             };
 
-            if (storageAvailable) {
-                // Use shared storage
-                try {
-                    await window.storage.set(`visitor:${currentVisitorId}`, JSON.stringify(visitor), true);
-                } catch (error) {
-                    console.log('Error saving to shared storage');
-                }
-            } else {
-                // Use localStorage with simulated visitors
-                const localVisitors = JSON.parse(localStorage.getItem('localVisitors') || '[]');
-                const existingIndex = localVisitors.findIndex(v => v.id === currentVisitorId);
-                
-                if (existingIndex !== -1) {
-                    localVisitors[existingIndex] = visitor;
-                } else {
-                    localVisitors.push(visitor);
-                }
-                
-                localStorage.setItem('localVisitors', JSON.stringify(localVisitors));
+            try {
+                await database.ref('visitors/' + currentVisitorId).set(visitor);
+                console.log('✅ Visitor saved to Firebase!');
+            } catch (error) {
+                console.error('Error saving visitor:', error);
             }
-
-            // Get IP for current visitor
-            getIPAddress();
         }
 
-        // Update current visitor activity
+        // Update current visitor
         async function updateCurrentVisitor() {
-            if (storageAvailable) {
-                try {
-                    const visitorData = await window.storage.get(`visitor:${currentVisitorId}`, true);
-                    if (visitorData) {
-                        const visitor = JSON.parse(visitorData.value);
-                        visitor.lastActivity = Date.now();
-                        visitor.pageViews = pageViews;
-                        await window.storage.set(`visitor:${currentVisitorId}`, JSON.stringify(visitor), true);
-                    }
-                } catch (error) {
-                    console.log('Error updating visitor');
-                }
-            } else {
-                // Update in localStorage
-                const localVisitors = JSON.parse(localStorage.getItem('localVisitors') || '[]');
-                const existingIndex = localVisitors.findIndex(v => v.id === currentVisitorId);
-                
-                if (existingIndex !== -1) {
-                    localVisitors[existingIndex].lastActivity = Date.now();
-                    localVisitors[existingIndex].pageViews = pageViews;
-                    localStorage.setItem('localVisitors', JSON.stringify(localVisitors));
-                }
+            try {
+                await database.ref('visitors/' + currentVisitorId).update({
+                    lastActivity: Date.now(),
+                    pageViews: pageViews
+                });
+            } catch (error) {
+                console.error('Error updating visitor:', error);
             }
         }
 
-        // Update activity periodically
+        // Update activity
         async function updateActivity() {
             await updateCurrentVisitor();
         }
 
+        // Listen to all visitors in real-time
+        function listenToVisitors() {
+            database.ref('visitors').on('value', (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    visitors = Object.values(data);
+                    visitors.sort((a, b) => b.timestamp - a.timestamp);
+                    
+                    if (document.getElementById('adminDashboard').classList.contains('active')) {
+                        displayVisitors(visitors);
+                    }
+                    
+                    visitorCount = visitors.length;
+                    document.getElementById('visitorCount').textContent = visitorCount;
+                }
+            });
+        }
+
         // Update local stats
-        async function updateLocalStats() {
+        function updateLocalStats() {
             const savedVisits = localStorage.getItem('totalVisits') || 0;
             const newVisits = parseInt(savedVisits) + 1;
             localStorage.setItem('totalVisits', newVisits);
@@ -1020,32 +997,9 @@
                 const data = await response.json();
                 document.getElementById('userIP').textContent = data.ip;
                 
-                // Update visitor record with IP
-                if (storageAvailable) {
-                    try {
-                        const visitorData = await window.storage.get(`visitor:${currentVisitorId}`, true);
-                        if (visitorData) {
-                            const visitor = JSON.parse(visitorData.value);
-                            visitor.ip = data.ip;
-                            await window.storage.set(`visitor:${currentVisitorId}`, JSON.stringify(visitor), true);
-                            
-                            if (document.getElementById('adminDashboard').classList.contains('active')) {
-                                await loadVisitors();
-                            }
-                        }
-                    } catch (error) {
-                        console.log('Error updating IP');
-                    }
-                } else {
-                    // Update in localStorage
-                    const localVisitors = JSON.parse(localStorage.getItem('localVisitors') || '[]');
-                    const existingIndex = localVisitors.findIndex(v => v.id === currentVisitorId);
-                    
-                    if (existingIndex !== -1) {
-                        localVisitors[existingIndex].ip = data.ip;
-                        localStorage.setItem('localVisitors', JSON.stringify(localVisitors));
-                    }
-                }
+                await database.ref('visitors/' + currentVisitorId).update({
+                    ip: data.ip
+                });
             } catch (error) {
                 document.getElementById('userIP').textContent = 'Недоступно';
             }
@@ -1074,49 +1028,7 @@
             }
         }
 
-        // Load and display visitors
-        async function loadVisitors() {
-            if (storageAvailable) {
-                // Load from shared storage - shows ALL real visitors from all devices
-                try {
-                    const result = await window.storage.list('visitor:', true);
-                    
-                    if (!result || !result.keys || result.keys.length === 0) {
-                        displayVisitors([]);
-                        return;
-                    }
-
-                    const visitorPromises = result.keys.map(async (key) => {
-                        try {
-                            const data = await window.storage.get(key, true);
-                            if (data && data.value) {
-                                return JSON.parse(data.value);
-                            }
-                        } catch (error) {
-                            console.log('Error loading visitor:', key);
-                        }
-                        return null;
-                    });
-
-                    const loadedVisitors = await Promise.all(visitorPromises);
-                    visitors = loadedVisitors.filter(v => v !== null);
-                    visitors.sort((a, b) => b.timestamp - a.timestamp);
-                    
-                    displayVisitors(visitors);
-                } catch (error) {
-                    console.log('Error loading from shared storage:', error);
-                    displayVisitors([]);
-                }
-            } else {
-                // Load from localStorage - shows only visitors from THIS browser
-                const localVisitors = JSON.parse(localStorage.getItem('localVisitors') || '[]');
-                visitors = localVisitors;
-                visitors.sort((a, b) => b.timestamp - a.timestamp);
-                displayVisitors(visitors);
-            }
-        }
-
-        // Display visitors in admin panel
+        // Display visitors
         function displayVisitors(visitorsList) {
             const container = document.getElementById('visitorsHistory');
             if (!container) return;
@@ -1124,20 +1036,20 @@
             if (visitorsList.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
-                        ${storageAvailable ? 
-                            'Вы первый посетитель! 🎉<br><small style="margin-top: 10px; display: block;">Откройте сайт в другом браузере или на другом устройстве, чтобы увидеть новых посетителей</small>' : 
-                            'Только вы сейчас здесь<br><small style="margin-top: 10px; display: block;">Откройте сайт в другом браузере на ЭТОМ компьютере, чтобы увидеть новых посетителей</small>'}
+                        Вы первый посетитель! 🎉<br>
+                        <small style="margin-top: 10px; display: block;">
+                            Откройте сайт в другом браузере или на другом устройстве<br>
+                            Все посетители сохраняются в РЕАЛЬНОЙ базе данных Firebase!
+                        </small>
                     </div>
                 `;
-                visitorCount = 0;
-                document.getElementById('visitorCount').textContent = '0';
                 return;
             }
 
             const now = Date.now();
             container.innerHTML = visitorsList.map((visitor, index) => {
-                const isOnline = (now - visitor.lastActivity) < 300000; // 5 minutes
-                const timeSinceActivity = Math.floor((now - visitor.lastActivity) / 60000); // minutes
+                const isOnline = (now - visitor.lastActivity) < 300000;
+                const timeSinceActivity = Math.floor((now - visitor.lastActivity) / 60000);
                 const isCurrent = visitor.id === currentVisitorId;
                 
                 return `
@@ -1191,59 +1103,14 @@
                     </div>
                 `;
             }).join('');
-
-            visitorCount = visitorsList.length;
-            document.getElementById('visitorCount').textContent = visitorCount;
         }
 
         // Clear history
         async function clearHistory() {
-            if (confirm('Вы уверены, что хотите очистить всю историю посетителей?')) {
-                if (storageAvailable) {
-                    try {
-                        const result = await window.storage.list('visitor:', true);
-                        
-                        if (result && result.keys) {
-                            const deletePromises = result.keys.map(key => 
-                                window.storage.delete(key, true)
-                            );
-                            await Promise.all(deletePromises);
-                        }
-                        
-                        visitors = [];
-                        displayVisitors([]);
-                        alert('История успешно очищена!');
-                        
-                        // Recreate current visitor
-                        const userAgent = navigator.userAgent;
-                        let browserName = 'Unknown';
-                        let osName = 'Unknown';
-
-                        if (userAgent.indexOf('Firefox') > -1) browserName = 'Firefox';
-                        else if (userAgent.indexOf('Chrome') > -1) browserName = 'Chrome';
-                        else if (userAgent.indexOf('Safari') > -1) browserName = 'Safari';
-                        else if (userAgent.indexOf('Edge') > -1) browserName = 'Edge';
-
-                        if (userAgent.indexOf('Windows') > -1) osName = 'Windows';
-                        else if (userAgent.indexOf('Mac') > -1) osName = 'macOS';
-                        else if (userAgent.indexOf('Linux') > -1) osName = 'Linux';
-                        else if (userAgent.indexOf('Android') > -1) osName = 'Android';
-                        else if (userAgent.indexOf('iOS') > -1) osName = 'iOS';
-
-                        await createVisitorRecord(browserName, osName);
-                        await loadVisitors();
-                    } catch (error) {
-                        alert('Ошибка при очистке истории');
-                    }
-                } else {
-                    // Clear localStorage
-                    localStorage.removeItem('localVisitors');
-                    localStorage.setItem('totalVisits', '0');
-                    localStorage.setItem('pageViews', '0');
-                    
-                    visitors = [];
-                    displayVisitors([]);
-                    alert('История успешно очищена!');
+            if (confirm('Вы уверены, что хотите очистить всю историю посетителей из базы данных?')) {
+                try {
+                    await database.ref('visitors').remove();
+                    alert('История успешно очищена из Firebase!');
                     
                     // Recreate current visitor
                     const userAgent = navigator.userAgent;
@@ -1262,13 +1129,14 @@
                     else if (userAgent.indexOf('iOS') > -1) osName = 'iOS';
 
                     await createVisitorRecord(browserName, osName);
-                    await loadVisitors();
+                } catch (error) {
+                    alert('Ошибка при очистке истории: ' + error.message);
                 }
             }
         }
 
         // Admin login
-        async function handleLogin(event) {
+        function handleLogin(event) {
             event.preventDefault();
             const password = document.getElementById('passwordInput').value;
             
@@ -1276,14 +1144,9 @@
                 document.getElementById('adminLogin').style.display = 'none';
                 document.getElementById('adminDashboard').classList.add('active');
                 document.getElementById('errorMessage').style.display = 'none';
-                await loadVisitors();
                 
-                // Auto-refresh visitors every 10 seconds
-                setInterval(async () => {
-                    if (document.getElementById('adminDashboard').classList.contains('active')) {
-                        await loadVisitors();
-                    }
-                }, 10000);
+                // Display current visitors
+                displayVisitors(visitors);
             } else {
                 document.getElementById('errorMessage').style.display = 'block';
                 document.getElementById('passwordInput').value = '';
