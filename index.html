@@ -812,7 +812,7 @@
         // Session tracking
         let sessionStartTime = Date.now();
         let pageViews = 0;
-        let visitorCount = 1;
+        let visitorCount = 0;
 
         // Visitor tracking
         let visitors = [];
@@ -826,7 +826,9 @@
             setInterval(updateSessionTime, 1000);
             getIPAddress();
             trackPageView();
-            loadVisitors();
+            
+            // Update activity every 30 seconds
+            setInterval(updateActivity, 30000);
         };
 
         // Generate unique visitor ID
@@ -850,22 +852,19 @@
         }
 
         // Track page views
-        function trackPageView() {
+        async function trackPageView() {
             pageViews++;
             document.getElementById('pageViews').textContent = pageViews;
             
-            // Update current visitor
+            // Update current visitor in shared storage
             if (currentVisitorId) {
-                updateCurrentVisitor();
+                await updateCurrentVisitor();
             }
-            
-            // Save to localStorage
-            localStorage.setItem('pageViews', pageViews);
         }
 
         // Initialize tracking
         function initializeTracking() {
-            // Check if visitor exists
+            // Check if visitor exists in localStorage
             currentVisitorId = localStorage.getItem('visitorId');
             if (!currentVisitorId) {
                 currentVisitorId = generateVisitorId();
@@ -895,28 +894,11 @@
             document.getElementById('timezone').textContent = Intl.DateTimeFormat().resolvedOptions().timeZone;
             document.getElementById('referrer').textContent = document.referrer || 'Прямой переход';
 
-            // Load saved data
-            const savedVisits = localStorage.getItem('totalVisits') || 0;
-            const newVisits = parseInt(savedVisits) + 1;
-            localStorage.setItem('totalVisits', newVisits);
-            document.getElementById('totalVisits').textContent = newVisits;
-
-            const lastVisit = localStorage.getItem('lastVisit');
-            if (lastVisit) {
-                document.getElementById('lastVisit').textContent = lastVisit;
-            }
-            localStorage.setItem('lastVisit', new Date().toLocaleString('ru-RU'));
-
-            // Load page views
-            const savedPageViews = localStorage.getItem('pageViews') || 0;
-            pageViews = parseInt(savedPageViews);
-            document.getElementById('pageViews').textContent = pageViews;
-
             // Create/update visitor record
             createVisitorRecord(browserName, osName);
         }
 
-        // Create visitor record
+        // Create visitor record in shared storage
         async function createVisitorRecord(browser, os) {
             const visitor = {
                 id: currentVisitorId,
@@ -933,46 +915,58 @@
                 ip: 'Загрузка...'
             };
 
-            // Load existing visitors
-            const savedVisitors = localStorage.getItem('visitors');
-            visitors = savedVisitors ? JSON.parse(savedVisitors) : [];
-
-            // Check if visitor exists
-            const existingIndex = visitors.findIndex(v => v.id === currentVisitorId);
-            if (existingIndex !== -1) {
-                // Update existing visitor
-                visitors[existingIndex].lastActivity = Date.now();
-                visitors[existingIndex].pageViews++;
-            } else {
-                // Add new visitor
-                visitors.unshift(visitor);
+            try {
+                // Save visitor to shared storage
+                await window.storage.set(`visitor:${currentVisitorId}`, JSON.stringify(visitor), true);
+                
+                // Update local stats
+                await updateLocalStats();
+            } catch (error) {
+                console.log('Storage not available, using localStorage fallback');
+                // Fallback to localStorage
+                localStorage.setItem(`visitor:${currentVisitorId}`, JSON.stringify(visitor));
             }
-
-            // Keep only last 50 visitors
-            if (visitors.length > 50) {
-                visitors = visitors.slice(0, 50);
-            }
-
-            // Save visitors
-            localStorage.setItem('visitors', JSON.stringify(visitors));
 
             // Get IP for current visitor
             getIPAddress();
         }
 
-        // Update current visitor
-        function updateCurrentVisitor() {
-            const index = visitors.findIndex(v => v.id === currentVisitorId);
-            if (index !== -1) {
-                visitors[index].lastActivity = Date.now();
-                visitors[index].pageViews++;
-                localStorage.setItem('visitors', JSON.stringify(visitors));
-                
-                // Update display if admin panel is open
-                if (document.getElementById('adminDashboard').classList.contains('active')) {
-                    displayVisitors();
+        // Update current visitor activity
+        async function updateCurrentVisitor() {
+            try {
+                const visitorData = await window.storage.get(`visitor:${currentVisitorId}`, true);
+                if (visitorData) {
+                    const visitor = JSON.parse(visitorData.value);
+                    visitor.lastActivity = Date.now();
+                    visitor.pageViews = pageViews;
+                    await window.storage.set(`visitor:${currentVisitorId}`, JSON.stringify(visitor), true);
                 }
+            } catch (error) {
+                console.log('Error updating visitor');
             }
+        }
+
+        // Update activity periodically
+        async function updateActivity() {
+            await updateCurrentVisitor();
+        }
+
+        // Update local stats
+        async function updateLocalStats() {
+            const savedVisits = localStorage.getItem('totalVisits') || 0;
+            const newVisits = parseInt(savedVisits) + 1;
+            localStorage.setItem('totalVisits', newVisits);
+            document.getElementById('totalVisits').textContent = newVisits;
+
+            const lastVisit = localStorage.getItem('lastVisit');
+            if (lastVisit) {
+                document.getElementById('lastVisit').textContent = lastVisit;
+            }
+            localStorage.setItem('lastVisit', new Date().toLocaleString('ru-RU'));
+
+            const savedPageViews = localStorage.getItem('pageViews') || 0;
+            pageViews = parseInt(savedPageViews);
+            document.getElementById('pageViews').textContent = pageViews;
         }
 
         // Get IP Address
@@ -983,15 +977,20 @@
                 document.getElementById('userIP').textContent = data.ip;
                 
                 // Update visitor record with IP
-                const index = visitors.findIndex(v => v.id === currentVisitorId);
-                if (index !== -1) {
-                    visitors[index].ip = data.ip;
-                    localStorage.setItem('visitors', JSON.stringify(visitors));
-                    
-                    // Update display if admin panel is open
-                    if (document.getElementById('adminDashboard').classList.contains('active')) {
-                        displayVisitors();
+                try {
+                    const visitorData = await window.storage.get(`visitor:${currentVisitorId}`, true);
+                    if (visitorData) {
+                        const visitor = JSON.parse(visitorData.value);
+                        visitor.ip = data.ip;
+                        await window.storage.set(`visitor:${currentVisitorId}`, JSON.stringify(visitor), true);
+                        
+                        // Update display if admin panel is open
+                        if (document.getElementById('adminDashboard').classList.contains('active')) {
+                            await loadVisitors();
+                        }
                     }
+                } catch (error) {
+                    console.log('Error updating IP');
                 }
             } catch (error) {
                 document.getElementById('userIP').textContent = 'Недоступно';
@@ -1021,40 +1020,67 @@
             }
         }
 
-        // Load and display visitors
-        function loadVisitors() {
-            const savedVisitors = localStorage.getItem('visitors');
-            if (savedVisitors) {
-                visitors = JSON.parse(savedVisitors);
-                displayVisitors();
+        // Load and display visitors from shared storage
+        async function loadVisitors() {
+            try {
+                const result = await window.storage.list('visitor:', true);
+                
+                if (!result || !result.keys || result.keys.length === 0) {
+                    displayVisitors([]);
+                    return;
+                }
+
+                // Load all visitor data
+                const visitorPromises = result.keys.map(async (key) => {
+                    try {
+                        const data = await window.storage.get(key, true);
+                        if (data && data.value) {
+                            return JSON.parse(data.value);
+                        }
+                    } catch (error) {
+                        console.log('Error loading visitor:', key);
+                    }
+                    return null;
+                });
+
+                const loadedVisitors = await Promise.all(visitorPromises);
+                visitors = loadedVisitors.filter(v => v !== null);
+                
+                // Sort by timestamp (newest first)
+                visitors.sort((a, b) => b.timestamp - a.timestamp);
+                
+                displayVisitors(visitors);
+            } catch (error) {
+                console.log('Storage not available:', error);
+                displayVisitors([]);
             }
-            
-            // Update visitor count
-            visitorCount = visitors.length;
-            document.getElementById('visitorCount').textContent = visitorCount;
         }
 
         // Display visitors in admin panel
-        function displayVisitors() {
+        function displayVisitors(visitorsList) {
             const container = document.getElementById('visitorsHistory');
             if (!container) return;
 
-            if (visitors.length === 0) {
-                container.innerHTML = '<div class="empty-state">Нет посетителей</div>';
+            if (visitorsList.length === 0) {
+                container.innerHTML = '<div class="empty-state">Нет посетителей<br><small>Откройте сайт в другом браузере или на другом устройстве</small></div>';
+                visitorCount = 0;
+                document.getElementById('visitorCount').textContent = '0';
                 return;
             }
 
             const now = Date.now();
-            container.innerHTML = visitors.map((visitor, index) => {
+            container.innerHTML = visitorsList.map((visitor, index) => {
                 const isOnline = (now - visitor.lastActivity) < 300000; // 5 minutes
                 const timeSinceActivity = Math.floor((now - visitor.lastActivity) / 60000); // minutes
+                const isCurrent = visitor.id === currentVisitorId;
                 
                 return `
-                    <div class="visitor-card">
+                    <div class="visitor-card" style="${isCurrent ? 'border: 2px solid var(--gold);' : ''}">
                         <div class="visitor-header">
                             <div class="visitor-id">
                                 ${isOnline ? '<span class="online-indicator"></span>' : ''}
-                                Посетитель #${visitors.length - index}
+                                Посетитель #${index + 1}
+                                ${isCurrent ? '<span style="color: var(--gold); margin-left: 10px;">👤 Вы</span>' : ''}
                             </div>
                             <div class="visitor-time">${visitor.visitTime}</div>
                         </div>
@@ -1101,26 +1127,54 @@
             }).join('');
 
             // Update visitor count
-            visitorCount = visitors.length;
+            visitorCount = visitorsList.length;
             document.getElementById('visitorCount').textContent = visitorCount;
         }
 
         // Clear history
-        function clearHistory() {
+        async function clearHistory() {
             if (confirm('Вы уверены, что хотите очистить всю историю посетителей?')) {
-                visitors = [];
-                localStorage.setItem('visitors', JSON.stringify(visitors));
-                localStorage.setItem('totalVisits', '0');
-                localStorage.setItem('pageViews', '0');
-                displayVisitors();
-                document.getElementById('totalVisits').textContent = '0';
-                document.getElementById('visitorCount').textContent = '0';
-                alert('История успешно очищена!');
+                try {
+                    const result = await window.storage.list('visitor:', true);
+                    
+                    if (result && result.keys) {
+                        // Delete all visitor records
+                        const deletePromises = result.keys.map(key => 
+                            window.storage.delete(key, true)
+                        );
+                        await Promise.all(deletePromises);
+                    }
+                    
+                    visitors = [];
+                    displayVisitors([]);
+                    alert('История успешно очищена!');
+                    
+                    // Recreate current visitor
+                    const userAgent = navigator.userAgent;
+                    let browserName = 'Unknown';
+                    let osName = 'Unknown';
+
+                    if (userAgent.indexOf('Firefox') > -1) browserName = 'Firefox';
+                    else if (userAgent.indexOf('Chrome') > -1) browserName = 'Chrome';
+                    else if (userAgent.indexOf('Safari') > -1) browserName = 'Safari';
+                    else if (userAgent.indexOf('Edge') > -1) browserName = 'Edge';
+
+                    if (userAgent.indexOf('Windows') > -1) osName = 'Windows';
+                    else if (userAgent.indexOf('Mac') > -1) osName = 'macOS';
+                    else if (userAgent.indexOf('Linux') > -1) osName = 'Linux';
+                    else if (userAgent.indexOf('Android') > -1) osName = 'Android';
+                    else if (userAgent.indexOf('iOS') > -1) osName = 'iOS';
+
+                    await createVisitorRecord(browserName, osName);
+                    await loadVisitors();
+                } catch (error) {
+                    alert('Ошибка при очистке истории. Убедитесь, что сайт открыт в Claude.ai');
+                }
             }
         }
 
         // Admin login
-        function handleLogin(event) {
+        async function handleLogin(event) {
             event.preventDefault();
             const password = document.getElementById('passwordInput').value;
             
@@ -1128,12 +1182,12 @@
                 document.getElementById('adminLogin').style.display = 'none';
                 document.getElementById('adminDashboard').classList.add('active');
                 document.getElementById('errorMessage').style.display = 'none';
-                loadVisitors();
+                await loadVisitors();
                 
                 // Auto-refresh visitors every 10 seconds
-                setInterval(() => {
+                setInterval(async () => {
                     if (document.getElementById('adminDashboard').classList.contains('active')) {
-                        loadVisitors();
+                        await loadVisitors();
                     }
                 }, 10000);
             } else {
