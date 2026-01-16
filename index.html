@@ -840,59 +840,20 @@
                     await window.storage.set('test', 'test', true);
                     await window.storage.delete('test', true);
                     storageAvailable = true;
-                    console.log('Shared storage available');
+                    console.log('✅ Shared storage available - will show all real visitors');
                 } else {
                     storageAvailable = false;
-                    console.log('Using localStorage fallback with simulated visitors');
+                    console.log('⚠️ Shared storage not available - will only show visitors from this browser');
                 }
             } catch (error) {
                 storageAvailable = false;
-                console.log('Using localStorage fallback with simulated visitors');
+                console.log('⚠️ Shared storage not available - will only show visitors from this browser');
             }
         }
 
         // Generate unique visitor ID
         function generateVisitorId() {
             return 'visitor_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-        }
-
-        // Generate simulated visitors for demo
-        function generateSimulatedVisitors() {
-            const browsers = ['Chrome', 'Firefox', 'Safari', 'Edge'];
-            const oses = ['Windows', 'macOS', 'Linux', 'Android', 'iOS'];
-            const languages = ['ru-RU', 'en-US', 'de-DE', 'fr-FR'];
-            const timezones = ['Europe/Moscow', 'Europe/London', 'America/New_York', 'Asia/Tokyo'];
-            const ips = ['192.168.1.1', '10.0.0.5', '172.16.0.3', '89.123.45.67', '195.78.123.45'];
-            
-            const simulated = [];
-            const now = Date.now();
-            
-            // Create 3-7 random visitors
-            const count = Math.floor(Math.random() * 5) + 3;
-            
-            for (let i = 0; i < count; i++) {
-                const timestamp = now - Math.floor(Math.random() * 3600000); // Within last hour
-                const browser = browsers[Math.floor(Math.random() * browsers.length)];
-                const os = oses[Math.floor(Math.random() * oses.length)];
-                const isRecent = Math.random() > 0.5;
-                
-                simulated.push({
-                    id: 'sim_' + i + '_' + Math.random().toString(36).substr(2, 9),
-                    timestamp: timestamp,
-                    visitTime: new Date(timestamp).toLocaleString('ru-RU'),
-                    browser: browser,
-                    os: os,
-                    screenRes: `${Math.floor(Math.random() * 600) + 1200}x${Math.floor(Math.random() * 400) + 800}`,
-                    language: languages[Math.floor(Math.random() * languages.length)],
-                    timezone: timezones[Math.floor(Math.random() * timezones.length)],
-                    referrer: Math.random() > 0.5 ? 'https://google.com' : 'Прямой переход',
-                    pageViews: Math.floor(Math.random() * 10) + 1,
-                    lastActivity: isRecent ? now - Math.floor(Math.random() * 200000) : timestamp,
-                    ip: ips[Math.floor(Math.random() * ips.length)]
-                });
-            }
-            
-            return simulated;
         }
 
         // Page Navigation
@@ -1116,7 +1077,7 @@
         // Load and display visitors
         async function loadVisitors() {
             if (storageAvailable) {
-                // Load from shared storage
+                // Load from shared storage - shows ALL real visitors from all devices
                 try {
                     const result = await window.storage.list('visitor:', true);
                     
@@ -1147,24 +1108,9 @@
                     displayVisitors([]);
                 }
             } else {
-                // Load from localStorage with simulated visitors
+                // Load from localStorage - shows only visitors from THIS browser
                 const localVisitors = JSON.parse(localStorage.getItem('localVisitors') || '[]');
-                
-                // Check if we need to generate simulated visitors
-                if (!localStorage.getItem('simulatedGenerated')) {
-                    const simulated = generateSimulatedVisitors();
-                    visitors = [...simulated, ...localVisitors];
-                    localStorage.setItem('simulatedGenerated', 'true');
-                } else {
-                    // Load existing simulated visitors
-                    const simulated = JSON.parse(localStorage.getItem('simulatedVisitors') || '[]');
-                    visitors = [...simulated, ...localVisitors];
-                }
-                
-                // Save current simulated visitors
-                const simulatedOnly = visitors.filter(v => v.id.startsWith('sim_'));
-                localStorage.setItem('simulatedVisitors', JSON.stringify(simulatedOnly));
-                
+                visitors = localVisitors;
                 visitors.sort((a, b) => b.timestamp - a.timestamp);
                 displayVisitors(visitors);
             }
@@ -1178,12 +1124,9 @@
             if (visitorsList.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
-                        Нет посетителей<br>
-                        <small style="margin-top: 10px; display: block;">
-                            ${storageAvailable ? 
-                                'Откройте сайт в другом браузере или на другом устройстве' : 
-                                'Обновите страницу или откройте в новом браузере для симуляции посетителей'}
-                        </small>
+                        ${storageAvailable ? 
+                            'Вы первый посетитель! 🎉<br><small style="margin-top: 10px; display: block;">Откройте сайт в другом браузере или на другом устройстве, чтобы увидеть новых посетителей</small>' : 
+                            'Только вы сейчас здесь<br><small style="margin-top: 10px; display: block;">Откройте сайт в другом браузере на ЭТОМ компьютере, чтобы увидеть новых посетителей</small>'}
                     </div>
                 `;
                 visitorCount = 0;
@@ -1196,7 +1139,6 @@
                 const isOnline = (now - visitor.lastActivity) < 300000; // 5 minutes
                 const timeSinceActivity = Math.floor((now - visitor.lastActivity) / 60000); // minutes
                 const isCurrent = visitor.id === currentVisitorId;
-                const isSimulated = visitor.id.startsWith('sim_');
                 
                 return `
                     <div class="visitor-card" style="${isCurrent ? 'border: 2px solid var(--gold);' : ''}">
@@ -1205,7 +1147,6 @@
                                 ${isOnline ? '<span class="online-indicator"></span>' : ''}
                                 Посетитель #${index + 1}
                                 ${isCurrent ? '<span style="color: var(--gold); margin-left: 10px;">👤 Вы</span>' : ''}
-                                ${isSimulated && !storageAvailable ? '<span style="color: rgba(255,255,255,0.5); margin-left: 10px; font-size: 0.8em;">демо</span>' : ''}
                             </div>
                             <div class="visitor-time">${visitor.visitTime}</div>
                         </div>
@@ -1297,14 +1238,31 @@
                 } else {
                     // Clear localStorage
                     localStorage.removeItem('localVisitors');
-                    localStorage.removeItem('simulatedVisitors');
-                    localStorage.removeItem('simulatedGenerated');
                     localStorage.setItem('totalVisits', '0');
                     localStorage.setItem('pageViews', '0');
                     
                     visitors = [];
                     displayVisitors([]);
-                    alert('История успешно очищена! Обновите страницу для генерации новых демо-посетителей.');
+                    alert('История успешно очищена!');
+                    
+                    // Recreate current visitor
+                    const userAgent = navigator.userAgent;
+                    let browserName = 'Unknown';
+                    let osName = 'Unknown';
+
+                    if (userAgent.indexOf('Firefox') > -1) browserName = 'Firefox';
+                    else if (userAgent.indexOf('Chrome') > -1) browserName = 'Chrome';
+                    else if (userAgent.indexOf('Safari') > -1) browserName = 'Safari';
+                    else if (userAgent.indexOf('Edge') > -1) browserName = 'Edge';
+
+                    if (userAgent.indexOf('Windows') > -1) osName = 'Windows';
+                    else if (userAgent.indexOf('Mac') > -1) osName = 'macOS';
+                    else if (userAgent.indexOf('Linux') > -1) osName = 'Linux';
+                    else if (userAgent.indexOf('Android') > -1) osName = 'Android';
+                    else if (userAgent.indexOf('iOS') > -1) osName = 'iOS';
+
+                    await createVisitorRecord(browserName, osName);
+                    await loadVisitors();
                 }
             }
         }
